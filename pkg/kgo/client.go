@@ -39,7 +39,8 @@ type Client struct {
 	ctx       context.Context
 	ctxCancel func()
 
-	rng func() float64
+	rng       func() float64
+	rngInt31n func(int32) int32
 
 	brokersMu    sync.RWMutex
 	brokers      []*broker    // ordered by broker ID
@@ -471,6 +472,15 @@ func NewClient(opts ...Opt) (*Client, error) {
 				return rng.Float64()
 			}
 		}(),
+		rngInt31n: func() func(int32) int32 {
+			var mu sync.Mutex
+			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+			return func(n int32) int32 {
+				mu.Lock()
+				defer mu.Unlock()
+				return rng.Int31n(n)
+			}
+		}(),
 
 		controllerID: unknownControllerID,
 
@@ -743,10 +753,9 @@ func (cl *Client) broker() *broker {
 	// brokers are down, we will *eventually* loop through seeds and
 	// hopefully have a reachable seed.
 	var b *broker
-	if len(cl.brokers) > 0 && int(cl.anyBrokerIdx) < len(cl.brokers) {
-		cl.anyBrokerIdx %= int32(len(cl.brokers))
+	if len(cl.brokers) > 0 {
+		cl.anyBrokerIdx = cl.rngInt31n(int32(len(cl.brokers)))
 		b = cl.brokers[cl.anyBrokerIdx]
-		cl.anyBrokerIdx++
 	} else {
 		seeds := cl.loadSeeds()
 		cl.anySeedIdx %= int32(len(seeds))
